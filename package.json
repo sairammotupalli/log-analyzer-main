@@ -1,0 +1,16 @@
+{
+  "name": "soc-log-analyzer",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"pnpm --filter backend dev\" \"pnpm --filter frontend dev\"",
+    "build": "pnpm --filter backend build && pnpm --filter frontend build",
+    "lint": "pnpm --filter frontend lint"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

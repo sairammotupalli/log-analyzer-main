@@ -1,0 +1,8 @@
+{
+  "functions": {
+    "api/[...all].ts": {
+      "maxDuration": 60
+    }
+  }
+}
+

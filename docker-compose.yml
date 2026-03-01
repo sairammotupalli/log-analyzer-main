@@ -1,0 +1,122 @@
+# SOC Log Analyzer - Full stack (Postgres + Backend + Frontend + Ollama)
+#
+# Required env vars (create .env from .env.example):
+#   JWT_SECRET          - Optional; auto-generated if unset (set for production)
+#   NEXTAUTH_SECRET     - Optional; auto-generated if unset (set for production)
+#   GOOGLE_CLIENT_ID    - For Google OAuth (optional)
+#   GOOGLE_CLIENT_SECRET- For Google OAuth (optional)
+#   ANTHROPIC_API_KEY   - For Anthropic Claude (optional — use Ollama instead)
+#
+# Run: docker compose up --build
+#
+# Ollama starts automatically and pulls the model on first run.
+# In Settings → LLM Settings, set:
+#   Provider:  Llama / Ollama
+#   Base URL:  http://ollama:11434
+#   Model:     llama3.2   (or whatever OLLAMA_MODEL is set to below)
+
+x-ollama-model: &ollama-model
+  OLLAMA_MODEL: llama3.2
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: soc_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: socanalyzer
+      POSTGRES_USER: socuser
+      POSTGRES_PASSWORD: socpassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U socuser -d socanalyzer"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: soc_ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    # ── Nvidia GPU (Linux only) ────────────────────────────────────────────────
+    # Uncomment if you have an Nvidia GPU + nvidia-container-toolkit:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # Pulls the model on first start. Skipped automatically if already downloaded.
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: soc_ollama_init
+    restart: "no"
+    environment:
+      <<: *ollama-model
+      OLLAMA_HOST: http://ollama:11434
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Pulling $$OLLAMA_MODEL..."
+        ollama pull $$OLLAMA_MODEL
+        echo "Done."
+
+  backend:
+    build:
+      context: .
+      dockerfile: ./packages/backend/Dockerfile
+    container_name: soc_backend
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://socuser:socpassword@postgres:5432/socanalyzer
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./packages/backend/uploads:/app/packages/backend/uploads
+
+  frontend:
+    build:
+      context: .
+      dockerfile: ./packages/frontend/Dockerfile
+    container_name: soc_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      PORT: 3000
+      NEXTAUTH_URL: http://localhost:3000
+      BACKEND_URL: http://backend:4000
+      NEXT_PUBLIC_BACKEND_URL: http://localhost:4000
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  ollama_data:
